@@ -172,6 +172,9 @@ static NSString *const AutocodingException = @"AutocodingException";
                     __autoreleasing NSString *ivarName = @(ivar);
                     if ([ivarName isEqualToString:key] || [ivarName isEqualToString:[@"_" stringByAppendingString:key]])
                     {
+#ifdef DEBUG
+                        [self sp_checkClassIsCodableWithKey:key class:propertyClass];
+#endif
                         //no setter, but setValue:forKey: will still work
                         codableProperties[key] = propertyClass;
                     }
@@ -184,6 +187,9 @@ static NSString *const AutocodingException = @"AutocodingException";
                     char *readonly = property_copyAttributeValue(property, "R");
                     if (dynamic && !readonly)
                     {
+#ifdef DEBUG
+                        [self sp_checkClassIsCodableWithKey:key class:propertyClass];
+#endif
                         //no ivar, but setValue:forKey: will still work
                         codableProperties[key] = propertyClass;
                     }
@@ -271,5 +277,69 @@ static NSString *const AutocodingException = @"AutocodingException";
         if (object) [aCoder encodeObject:object forKey:key];
     }
 }
+
+#pragma mark - Codable Checker
+
+#ifdef DEBUG
+
++ (NSSet<Class> *)sp_certainCodableClasses
+{
+    static NSSet<Class> *codableClasses = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wnullable-to-nonnull-conversion"
+        codableClasses = [NSSet setWithObjects:
+                          NSClassFromString(@"NSNumber"),
+                          NSClassFromString(@"NSValue"),
+                          NSClassFromString(@"NSString"),
+                          NSClassFromString(@"NSDate"),
+#pragma clang diagnostic pop
+                          nil];
+    });
+    return codableClasses;
+}
+
++ (NSArray<Class> *)sp_uncodableClasses
+{
+    static NSArray<Class> *uncodableClasses = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wnullable-to-nonnull-conversion"
+        uncodableClasses = [NSArray arrayWithObjects:
+                            NSClassFromString(@"NSTimer"),
+                            NSClassFromString(@"UIResponder"),
+#pragma clang diagnostic pop
+                            nil];
+    });
+    return uncodableClasses;
+}
+
++ (BOOL)sp_isClassCodable:(Class)class
+{
+    // Check common value types in set, speed up method
+    if ([[self sp_certainCodableClasses] containsObject:class])
+    {
+        return YES;
+    }
+    
+    // Check blacklist class
+    for (Class uncodableClass in [self sp_uncodableClasses])
+    {
+        if ([class isSubclassOfClass:uncodableClass])
+        {
+            return NO;
+        }
+    }
+    return YES;
+}
+
+- (void)sp_checkClassIsCodableWithKey:(NSString *)key class:(Class)class
+{
+    NSAssert([NSObject sp_isClassCodable:class], @"Instance:%@'s property %@'s class %@ not confirm to NSCoding", self, key, class);
+}
+
+#endif
 
 @end
